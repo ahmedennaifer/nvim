@@ -49,18 +49,38 @@ vim.opt.showmode = false
 vim.opt.hlsearch = true
 vim.opt.incsearch = true
 
--- Completely disable LSP diagnostics and warnings
+-- Configure LSP diagnostics (re-enabled for error display)
 vim.diagnostic.config({
-    virtual_text = false,
-    signs = false,     -- Disable all signs including error icons
-    underline = false, -- Disable underlines
+    virtual_text = {
+        enabled = true,
+        source = "if_many",  -- Show source only if multiple sources
+        prefix = "●",        -- Simple prefix instead of icons
+        spacing = 4,
+        format = function(diagnostic)
+            return string.format(" %s", diagnostic.message)
+        end,
+    },
+    signs = {
+        enabled = true,
+        priority = 10,
+        -- Use simple text instead of icons to avoid font issues
+        text = {
+            [vim.diagnostic.severity.ERROR] = "E",
+            [vim.diagnostic.severity.WARN] = "W", 
+            [vim.diagnostic.severity.HINT] = "H",
+            [vim.diagnostic.severity.INFO] = "I",
+        },
+    },
+    underline = true,       -- Enable underlines for errors
     update_in_insert = false,
-    severity_sort = false,
+    severity_sort = true,   -- Sort by severity
     float = {
-        border = "rounded",
+        enabled = true,
         source = "always",
+        border = "rounded",
         header = "",
         prefix = "",
+        focusable = false,
     },
 })
 
