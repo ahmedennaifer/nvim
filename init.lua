@@ -1,4 +1,3 @@
-
 -- Enhanced single file Neovim configuration with Oil.nvim and Symbols Outline
 
 -- Set leader key early
@@ -124,11 +123,17 @@ autocmd("BufWritePre", {
     end,
 })
 
--- Format on save for Python files with Ruff
+-- Format on save for Python files with Ruff (not autopep8)
 autocmd("BufWritePre", {
     pattern = "*.py",
     callback = function()
-        vim.lsp.buf.format({ timeout_ms = 1000 })
+        -- Use Ruff for formatting via LSP
+        vim.lsp.buf.format({ 
+            timeout_ms = 2000,
+            filter = function(client)
+                return client.name == "ruff"  -- Only use ruff for formatting
+            end
+        })
     end,
 })
 
@@ -186,6 +191,14 @@ local lsp_mappings = function(client, bufnr)
     lsp_map("[d", vim.diagnostic.goto_prev, "Previous Diagnostic")
     lsp_map("]d", vim.diagnostic.goto_next, "Next Diagnostic")
     lsp_map("<leader>ld", "<cmd>Telescope diagnostics<cr>", "Diagnostics")
+    
+    -- EXPLICIT CODE ACTIONS TOGGLE
+    lsp_map("<leader>la", vim.lsp.buf.code_action, "Show Code Actions")
+    lsp_map("<leader>lA", function()
+        vim.lsp.buf.code_action({
+            context = { only = { "quickfix", "refactor", "source" } }
+        })
+    end, "Show All Code Actions")
 
     -- Highlight references of the word under your cursor
     if client and client.server_capabilities.documentHighlightProvider then
@@ -318,51 +331,121 @@ local plugins = {
                     { section = "startup" },
                 },
             },
-            -- Snacks Explorer (as alternative to oil for tree view)
+            -- Snacks Explorer (file tree)
             explorer = {
                 enabled = true,
-                replace_netrw = false, -- Let oil handle directory buffers
-                auto_close = false,    -- Keep explorer open when selecting files
-                focus = "list",        -- Focus the list when opening
+                replace_netrw = false,
+                auto_close = false,
+                focus = "list",
             },
             picker = {
                 enabled = true,
-                -- Configure sources properly to avoid "No supported finder" error
+                -- Configure individual sources with proper exclude patterns
                 sources = {
                     files = {
                         hidden = false,
                         ignored = false,
-                        -- Use find command instead of fd to avoid errors
-                        cmd = "find",
-                        args = { ".", "-type", "f", "-not", "-path", "*/\\.git/*" },
+                        -- Hide common unwanted files/directories
+                        exclude = {
+                            "__pycache__",
+                            "*.pyc",
+                            "*.pyo",
+                            "node_modules",
+                            ".git",
+                            "build",
+                            "dist",
+                            ".DS_Store",
+                        },
                     },
                     grep = {
-                        -- Use ripgrep if available, otherwise grep
-                        cmd = vim.fn.executable("rg") == 1 and "rg" or "grep",
-                        args = vim.fn.executable("rg") == 1 and {
-                            "--color=never",
-                            "--no-heading", 
-                            "--with-filename",
-                            "--line-number",
-                            "--column",
-                            "--smart-case",
-                        } or {
-                            "-r",
-                            "-n",
-                            "-H",
+                        hidden = false,
+                        ignored = false,
+                        exclude = {
+                            "__pycache__",
+                            "*.pyc",
+                            "*.pyo",
+                            "node_modules",
+                            ".git",
+                            "build",
+                            "dist",
                         },
-                        supports_live = vim.fn.executable("rg") == 1,
                     },
                     explorer = {
-                        hidden = true,
-                        git_status = true,
-                        git_untracked = true,
-                        follow_file = true,
+                        hidden = false,
+                        ignored = false,
+                        -- IMPORTANT: These patterns hide files from the tree view
+                        exclude = {
+                            "__pycache__",
+                            "*.pyc",
+                            "*.pyo",
+                            "node_modules",
+                            ".git",
+                            "build",
+                            "dist",
+                            ".DS_Store",
+                            "*.log",
+                            "*.tmp",
+                        },
+                        -- Tree view configuration
                         tree = true,
+                        git_status = true,
+                        git_untracked = false,
+                        follow_file = true,
                         auto_close = false,
                         layout = {
                             preset = "sidebar",
                             preview = false,
+                        },
+                        -- DEFAULT KEYBINDINGS (these work out of the box):
+                        -- a = "explorer_add" (add file/directory)
+                        -- d = "explorer_del" (delete file/directory)  
+                        -- r = "explorer_rename" (rename file/directory)
+                        -- c = "explorer_copy" (copy file/directory)
+                        -- m = "explorer_move" (move/cut file/directory - THIS IS WHAT YOU NEED)
+                        -- <CR> = open file/expand directory
+                        -- <BS> = go up directory
+                        -- h = close directory
+                        -- l = confirm (same as <CR>)
+                        -- I = toggle ignored files
+                        -- H = toggle hidden files
+                        -- ? = show help
+                        
+                        -- You can also add custom actions if needed
+                        actions = {
+                            -- Custom action example (you probably don't need this)
+                            custom_copy_path = {
+                                action = function(picker, item)
+                                    if item then
+                                        vim.fn.setreg("+", item.file)
+                                        vim.notify("Copied: " .. item.file, vim.log.levels.INFO)
+                                    end
+                                end,
+                            },
+                        },
+                        -- Custom keybindings (only if you want to override defaults)
+                        win = {
+                            list = {
+                                keys = {
+                                    -- The default keybindings already work, but you can override:
+                                    -- ["m"] = "explorer_move",  -- This should already work by default
+                                    -- ["<C-x>"] = "custom_copy_path",  -- Example custom binding
+                                    ["?"] = function()
+                                        vim.notify([[
+Snacks Explorer Default Keys:
+• <CR>/l - Open file/directory
+• <BS>/h - Go up/close directory
+• a - Add file/directory
+• d - Delete file/directory  
+• r - Rename file/directory
+• c - Copy file/directory
+• m - MOVE/CUT file/directory (this is what you need!)
+• I - Toggle ignored files
+• H - Toggle hidden files
+• ? - Show this help
+                                        ]], vim.log.levels.INFO, { title = "Explorer Help" })
+                                    end,
+                                },
+                            },
                         },
                     },
                 },
@@ -426,7 +509,7 @@ local plugins = {
         },
     },
 
-    -- OIL.NVIM - Edit filesystem like a buffer (REPLACES NVIM-TREE)
+    -- OIL.NVIM - Edit filesystem like a buffer (ENHANCED for proper cutting/deleting)
     {
         "stevearc/oil.nvim",
         ---@module 'oil'
@@ -454,9 +537,15 @@ local plugins = {
                 -- Restore window options when exiting oil buffer
                 restore_win_options = true,
                 -- Skip the confirmation popup for simple operations (:help oil.skip_confirm_for_simple_edits)
-                skip_confirm_for_simple_edits = true,
-                -- Selecting a new/moved/renamed file or directory will prompt you to save changes first
+                skip_confirm_for_simple_edits = false,  -- CHANGED: Show confirmations for safety
+                -- Deleting a file will prompt you to save changes first (:help oil.prompt_save_on_select_new_entry)
                 prompt_save_on_select_new_entry = true,
+                -- ENHANCED: Enable delete operations
+                delete_to_trash = false,  -- Set to true if you want to use trash instead of permanent delete
+                -- ENHANCED: Watch for external changes and update the buffer
+                watch_for_changes = true,
+                -- ENHANCED: Allow experimental features for better editing
+                experimental_watch_for_changes = true,
                 -- Keymaps in oil buffer. Can be any value that `vim.keymap.set` accepts OR a table of keymap
                 keymaps = {
                     ["g?"] = "actions.show_help",
@@ -474,7 +563,10 @@ local plugins = {
                     ["gs"] = "actions.change_sort",
                     ["gx"] = "actions.open_external",
                     ["g."] = "actions.toggle_hidden",
-                    ["g\\"] = "actions.toggle_trash", 
+                    ["g\\"] = "actions.toggle_trash",
+                    -- ENHANCED: Add cut, copy, paste operations
+                    ["<C-y>"] = "actions.copy_entry_path",  -- Copy path to clipboard
+                    ["yy"] = "actions.copy_entry_path",      -- Vim-like copy path
                 },
                 -- Set to false to disable all of the above keymaps
                 use_default_keymaps = true,
@@ -483,11 +575,22 @@ local plugins = {
                     show_hidden = false,
                     -- This function defines what is considered a "hidden" file
                     is_hidden_file = function(name, bufnr)
-                        return vim.startswith(name, ".")
+                        -- ENHANCED: Hide more files by default
+                        return vim.startswith(name, ".") or 
+                               name == "__pycache__" or
+                               vim.endswith(name, ".pyc") or
+                               vim.endswith(name, ".pyo") or
+                               name == "node_modules" or
+                               name == ".git" or
+                               name == ".DS_Store" or
+                               name == "Thumbs.db"
                     end,
                     -- This function defines what will never be shown, even when `show_hidden` is set
                     is_always_hidden = function(name, bufnr)
-                        return false
+                        -- These files are never shown, even with show_hidden = true
+                        return name == "__pycache__" or 
+                               vim.endswith(name, ".pyc") or
+                               vim.endswith(name, ".pyo")
                     end,
                     -- Sort file names case insensitive
                     case_insensitive = false,
@@ -549,6 +652,140 @@ local plugins = {
                 ssh = {
                     border = "rounded",
                 },
+            })
+            
+            -- ENHANCED: Custom keymaps for oil buffers to enable proper file operations
+            vim.api.nvim_create_autocmd("FileType", {
+                pattern = "oil",
+                callback = function()
+                    -- Enable modifiable for the buffer
+                    vim.bo.modifiable = true
+                    
+                    -- Enhanced delete with dd (single file)
+                    vim.keymap.set("n", "dd", function()
+                        local line = vim.api.nvim_win_get_cursor(0)[1]
+                        -- Simply delete the line - Oil handles the rest
+                        vim.api.nvim_buf_set_lines(0, line - 1, line, false, {})
+                        vim.notify("File marked for deletion (save with :w)", vim.log.levels.INFO)
+                    end, { buffer = true, desc = "Delete file" })
+                    
+                    -- Enhanced delete in visual mode (multiple files)
+                    vim.keymap.set("v", "d", function()
+                        local start_line = vim.fn.line("'<")
+                        local end_line = vim.fn.line("'>")
+                        
+                        -- Delete from bottom to top to maintain line numbers
+                        for line = end_line, start_line, -1 do
+                            vim.api.nvim_buf_set_lines(0, line - 1, line, false, {})
+                        end
+                        local count = end_line - start_line + 1
+                        vim.notify(count .. " files marked for deletion (save with :w)", vim.log.levels.INFO)
+                    end, { buffer = true, desc = "Delete selected files" })
+                    
+                    -- Cut files in visual mode (for moving)
+                    vim.keymap.set("v", "x", function()
+                        local start_line = vim.fn.line("'<")
+                        local end_line = vim.fn.line("'>")
+                        
+                        -- Store file paths before deleting
+                        local files = {}
+                        for line = start_line, end_line do
+                            local line_content = vim.api.nvim_buf_get_lines(0, line - 1, line, false)[1]
+                            if line_content and line_content ~= "" then
+                                -- Extract filename (remove icon and spaces)
+                                local filename = line_content:match("%s*[^%s]*%s*(.*)")
+                                if filename then
+                                    table.insert(files, filename)
+                                end
+                            end
+                        end
+                        
+                        -- Delete the lines (Oil will handle the file operations)
+                        for line = end_line, start_line, -1 do
+                            vim.api.nvim_buf_set_lines(0, line - 1, line, false, {})
+                        end
+                        
+                        -- Store in global for potential paste operation
+                        _G.oil_cut_files = files
+                        vim.notify("Cut " .. #files .. " files (save with :w to delete, navigate and 'p' to move)", vim.log.levels.INFO)
+                    end, { buffer = true, desc = "Cut files for moving" })
+                    
+                    -- Copy files (yank paths to clipboard)
+                    vim.keymap.set("v", "y", function()
+                        local start_line = vim.fn.line("'<")
+                        local end_line = vim.fn.line("'>")
+                        
+                        local paths = {}
+                        for line = start_line, end_line do
+                            local line_content = vim.api.nvim_buf_get_lines(0, line - 1, line, false)[1]
+                            if line_content and line_content ~= "" then
+                                -- Extract filename and get full path
+                                local filename = line_content:match("%s*[^%s]*%s*(.*)")
+                                if filename then
+                                    local current_dir = vim.fn.expand("%:p:h")
+                                    local full_path = current_dir .. "/" .. filename
+                                    table.insert(paths, full_path)
+                                end
+                            end
+                        end
+                        
+                        -- Copy paths to clipboard
+                        vim.fn.setreg("+", table.concat(paths, "\n"))
+                        vim.notify("Copied " .. #paths .. " file paths to clipboard", vim.log.levels.INFO)
+                    end, { buffer = true, desc = "Copy file paths" })
+                    
+                    -- Paste/move files (placeholder - actual implementation would need shell commands)
+                    vim.keymap.set("n", "p", function()
+                        if _G.oil_cut_files and #_G.oil_cut_files > 0 then
+                            vim.notify("Cut files: " .. table.concat(_G.oil_cut_files, ", ") .. "\nMove them manually or save and refresh", vim.log.levels.INFO)
+                            -- Clear the cut files
+                            _G.oil_cut_files = nil
+                        else
+                            vim.notify("Nothing to paste", vim.log.levels.WARN)
+                        end
+                    end, { buffer = true, desc = "Show cut files (manual move required)" })
+                    
+                    -- Create new file
+                    vim.keymap.set("n", "%", function()
+                        vim.ui.input({ prompt = "New file name: " }, function(name)
+                            if name then
+                                local current_line = vim.api.nvim_win_get_cursor(0)[1]
+                                vim.api.nvim_buf_set_lines(0, current_line, current_line, false, { name })
+                                vim.notify("Created: " .. name .. " (save with :w)", vim.log.levels.INFO)
+                            end
+                        end)
+                    end, { buffer = true, desc = "Create new file" })
+                    
+                    -- Create new directory
+                    vim.keymap.set("n", "d", function()
+                        vim.ui.input({ prompt = "New directory name: " }, function(name)
+                            if name then
+                                local current_line = vim.api.nvim_win_get_cursor(0)[1]
+                                vim.api.nvim_buf_set_lines(0, current_line, current_line, false, { name .. "/" })
+                                vim.notify("Created directory: " .. name .. "/ (save with :w)", vim.log.levels.INFO)
+                            end
+                        end)
+                    end, { buffer = true, desc = "Create new directory" })
+                    
+                    -- Enhanced help
+                    vim.keymap.set("n", "<leader>?", function()
+                        vim.notify([[
+Oil File Manager:
+• <CR> - Open file/directory
+• - - Go to parent directory
+• dd - Delete file
+• Vd - Delete selection
+• Vx - Cut files (for moving)
+• Vy - Copy file paths to clipboard
+• p - Show cut files
+• % - Create new file
+• d - Create new directory
+• g. - Toggle hidden files
+• :w - Save changes (commit file operations)
+• <C-l> - Refresh
+                        ]], vim.log.levels.INFO, { title = "Oil Commands" })
+                    end, { buffer = true, desc = "Show Oil help" })
+                end,
             })
         end,
     },
@@ -623,65 +860,6 @@ local plugins = {
             ]])
         end,
     },
-    -- {
-    --     "echasnovski/mini.files",
-    --     version = false,
-    --     keys = {
-    --         { "<leader>ef", function() require("mini.files").open(vim.api.nvim_buf_get_name(0), true) end, desc = "Open mini.files (Directory of Current File)" },
-    --         { "<leader>eF", function() require("mini.files").open(vim.uv.cwd(), true) end, desc = "Open mini.files (cwd)" },
-    --     },
-    --     config = function()
-    --         require("mini.files").setup({
-    --             content = {
-    --                 filter = nil,
-    --                 prefix = nil,
-    --                 sort = nil,
-    --             },
-    --             mappings = {
-    --                 close       = 'q',
-    --                 go_in       = 'l',
-    --                 go_in_plus  = 'L',
-    --                 go_out      = 'h',
-    --                 go_out_plus = 'H',
-    --                 reset       = '<BS>',
-    --                 reveal_cwd  = '@',
-    --                 show_help   = 'g?',
-    --                 synchronize = '=',
-    --                 trim_left   = '<',
-    --                 trim_right  = '>',
-    --             },
-    --             options = {
-    --                 permanent_delete = true,
-    --                 use_as_default_explorer = false, -- Let oil handle this
-    --             },
-    --             windows = {
-    --                 max_number = math.huge,
-    --                 preview = false,
-    --                 width_focus = 50,
-    --                 width_nofocus = 15,
-    --                 width_preview = 25,
-    --             },
-    --         })
-    --         
-    --         -- Helper function to toggle dotfiles
-    --         local show_dotfiles = true
-    --         local filter_show = function(fs_entry) return true end
-    --         local filter_hide = function(fs_entry) return not vim.startswith(fs_entry.name, ".") end
-    --         local toggle_dotfiles = function()
-    --             show_dotfiles = not show_dotfiles
-    --             local new_filter = show_dotfiles and filter_show or filter_hide
-    --             require("mini.files").refresh({ content = { filter = new_filter } })
-    --         end
-    --         
-    --         vim.api.nvim_create_autocmd('User', {
-    --             pattern = 'MiniFilesBufferCreate',
-    --             callback = function(args)
-    --                 local buf_id = args.data.buf_id
-    --                 vim.keymap.set('n', 'g.', toggle_dotfiles, { buffer = buf_id, desc = 'Toggle hidden files' })
-    --             end,
-    --         })
-    --     end,
-    -- },
 
     -- OUTLINE.NVIM - Modern symbols outline with ANIMATIONS
     {
@@ -836,93 +1014,6 @@ local plugins = {
         end,
     },
 
-    -- AERIAL.NVIM - Alternative symbols outline (uncomment if you prefer aerial)
-    -- {
-    --     "stevearc/aerial.nvim",
-    --     dependencies = {
-    --         "nvim-treesitter/nvim-treesitter",
-    --         "nvim-tree/nvim-web-devicons"
-    --     },
-    --     keys = {
-    --         { "<leader>o", "<cmd>AerialToggle!<CR>", desc = "Aerial" },
-    --         { "<leader>so", "<cmd>AerialToggle<CR>", desc = "Symbols outline" },
-    --         { "<leader>sn", "<cmd>AerialNavToggle<CR>", desc = "Aerial Navigation" },
-    --     },
-    --     opts = {
-    --         -- Priority list of preferred backends for aerial.
-    --         backends = { "treesitter", "lsp", "markdown", "man" },
-    --         layout = {
-    --             max_width = { 40, 0.2 },
-    --             width = nil,
-    --             min_width = 10,
-    --             win_opts = {},
-    --             default_direction = "prefer_right",
-    --             placement = "window",
-    --         },
-    --         show_guides = true,
-    --         filter_kind = {
-    --             "Class",
-    --             "Constructor",
-    --             "Enum",
-    --             "Function",
-    --             "Interface",
-    --             "Module",
-    --             "Method",
-    --             "Struct",
-    --         },
-    --         guides = {
-    --             mid_item = "├─",
-    --             last_item = "└─",
-    --             nested_top = "│ ",
-    --             whitespace = "  ",
-    --         },
-    --         -- Disable on_attach by default to prevent LSP conflicts
-    --         on_attach = function(bufnr) end,
-    --         -- Automatically open aerial when entering supported files
-    --         open_automatic = false,
-    --         -- Automatically close aerial when jumping to a symbol
-    --         close_automatic_events = {},
-    --         keymaps = {
-    --             ["?"] = "actions.show_help",
-    --             ["g?"] = "actions.show_help",
-    --             ["<CR>"] = "actions.jump",
-    --             ["<2-LeftMouse>"] = "actions.jump",
-    --             ["<C-v>"] = "actions.jump_vsplit",
-    --             ["<C-s>"] = "actions.jump_split",
-    --             ["p"] = "actions.scroll",
-    --             ["<C-j>"] = "actions.down_and_scroll",
-    --             ["<C-k>"] = "actions.up_and_scroll",
-    --             ["{"] = "actions.prev",
-    --             ["}"] = "actions.next",
-    --             ["[["] = "actions.prev_up",
-    --             ["]]"] = "actions.next_up",
-    --             ["q"] = "actions.close",
-    --             ["o"] = "actions.tree_toggle",
-    --             ["za"] = "actions.tree_toggle",
-    --             ["O"] = "actions.tree_toggle_recursive",
-    --             ["zA"] = "actions.tree_toggle_recursive",
-    --             ["l"] = "actions.tree_open",
-    --             ["zo"] = "actions.tree_open",
-    --             ["L"] = "actions.tree_open_recursive",
-    --             ["zO"] = "actions.tree_open_recursive",
-    --             ["h"] = "actions.tree_close",
-    --             ["zc"] = "actions.tree_close",
-    --             ["H"] = "actions.tree_close_recursive",
-    --             ["zC"] = "actions.tree_close_recursive",
-    --             ["zr"] = "actions.tree_increase_fold_level",
-    --             ["zR"] = "actions.tree_open_all",
-    --             ["zm"] = "actions.tree_decrease_fold_level",
-    --             ["zM"] = "actions.tree_close_all",
-    --             ["zx"] = "actions.tree_sync_folds",
-    --             ["zX"] = "actions.tree_sync_folds",
-    --         },
-    --         lazy_load = true,
-    --         disable_max_lines = 10000,
-    --         disable_max_size = 2000000, -- Default 2MB
-    --         nerd_font = "auto",
-    --     },
-    -- },
-
     -- Catppuccin theme - Modern and beautiful
     {
         "catppuccin/nvim",
@@ -1000,6 +1091,8 @@ local plugins = {
     { "rose-pine/neovim",            name = "rose-pine", lazy = true },
     { "folke/tokyonight.nvim",       lazy = true },
     { "EdenEast/nightfox.nvim",      lazy = true },
+    { "shaunsingh/nord.nvim",        lazy = true }, 
+    {'AlexvZyl/nordic.nvim',         lazy = true },
     { "rebelot/kanagawa.nvim",       lazy = true },
     { "sainnhe/everforest",          lazy = true },
     { "sainnhe/gruvbox-material",    lazy = true },
@@ -1142,8 +1235,6 @@ local plugins = {
             })
 
             telescope.load_extension("fzf")
-            -- Load aerial extension if arial is enabled
-            -- telescope.load_extension("aerial")
         end,
     },
 
@@ -1178,7 +1269,7 @@ local plugins = {
                 },
             })
 
-            -- FIXED: Single Python LSP configuration to prevent conflicts
+            -- FIXED: Python LSP configuration with proper pyright and ruff setup
             local servers = {
                 lua_ls = {
                     Lua = {
@@ -1187,26 +1278,53 @@ local plugins = {
                         diagnostics = { globals = { 'vim' } },
                     },
                 },
-                -- Use only basedpyright for Python (faster than pyright)
-                basedpyright = {
-                    basedpyright = {
+                -- Use pyright for Python (less strict configuration)
+                pyright = {
+                    pyright = {
                         disableOrganizeImports = true, -- Let ruff handle this
+                        disableTaggedHints = true,     -- Less clutter
+                    },
+                    python = {
                         analysis = {
-                            typeCheckingMode = "basic",
+                            typeCheckingMode = "basic",    -- Less strict than "strict"
                             diagnosticMode = "openFilesOnly",
                             autoSearchPaths = true,
                             useLibraryCodeForTypes = true,
+                            diagnosticSeverityOverrides = {
+                                -- Make common warnings less annoying
+                                reportUnusedImport = "information",
+                                reportUnusedClass = "information", 
+                                reportUnusedFunction = "information",
+                                reportUnusedVariable = "information",
+                                reportGeneralTypeIssues = "warning",
+                                reportOptionalMemberAccess = "information",
+                                reportOptionalSubscript = "information",
+                                reportPrivateImportUsage = "information",
+                            },
                         },
                     },
                 },
+                -- Ruff for formatting, linting, and code actions
                 ruff = {
-                    settings = {
-                        args = {
-                            "--config=pyproject.toml", -- Use project ruff config if available
+                    init_options = {
+                        settings = {
+                            -- Enable all ruff features
+                            format = { enabled = true },
+                            lint = { enabled = true },
+                            organizeImports = true,
+                            fixAll = true,
+                            codeAction = {
+                                disableRuleComment = {
+                                    enable = true,
+                                },
+                                fixViolation = {
+                                    enable = true,
+                                },
+                            },
                         },
                     },
                 },
-                tsserver = {},
+                ts_ls = {},
                 gopls = {
                     gopls = {
                         analyses = {
@@ -1218,19 +1336,20 @@ local plugins = {
                 },
             }
 
-            -- Install formatters and linters - SELECTIVE to avoid conflicts
+            -- Install ONLY what we need - NO EXTRA BULLSHIT
             require("mason-tool-installer").setup({
                 ensure_installed = {
                     "stylua",        -- Lua formatter
-                    "basedpyright",  -- Python LSP (instead of pyright)
-                    "ruff",          -- Python linter and formatter (will handle both)
-                    "prettier",      -- JS/TS formatter
-                    "eslint_d",      -- JS/TS linter
-                    "gofumpt",       -- Go formatter
+                    "pyright",      -- Python LSP ONLY
+                    "ruff",         -- Python formatter/linter ONLY
+                    "prettier",     -- JS/TS formatter
+                    "eslint_d",     -- JS/TS linter
+                    "gofumpt",      -- Go formatter
                     "golangci-lint", -- Go linter
+                    -- NO pycodestyle, flake8, autopep8, black, or any other Python shit
                 },
                 auto_update = false,
-                run_on_start = false, -- Prevent auto-installation conflicts
+                run_on_start = false,
             })
 
             -- Ensure the servers listed above are installed
@@ -1275,11 +1394,16 @@ local plugins = {
                 -- Configure Python LSP responsibilities
                 if ft == "python" then
                     if client.name == "ruff" then
-                        -- Ruff handles formatting and organizing imports
+                        -- Ruff handles formatting, linting, and code actions
                         client.server_capabilities.documentFormattingProvider = true
                         client.server_capabilities.documentRangeFormattingProvider = true
-                    elseif client.name == "basedpyright" then
-                        -- basedpyright handles hover, completion, diagnostics
+                        client.server_capabilities.codeActionProvider = true
+                        
+                        -- Add ruff-specific keymaps
+                        lsp_map("<leader>rf", "<cmd>RuffAutofix<cr>", "Ruff: Fix all auto-fixable")
+                        lsp_map("<leader>ro", "<cmd>RuffOrganizeImports<cr>", "Ruff: Organize imports")
+                    elseif client.name == "pyright" then
+                        -- Pyright handles hover, completion, diagnostics, go-to-definition
                         client.server_capabilities.documentFormattingProvider = false
                         client.server_capabilities.documentRangeFormattingProvider = false
                     end
@@ -1289,30 +1413,48 @@ local plugins = {
             -- Configure servers individually to prevent conflicts
             local lspconfig = require("lspconfig")
             
-            -- Set up basedpyright for Python
-            lspconfig.basedpyright.setup({
+            -- Set up pyright for Python (type checking and completion)
+            lspconfig.pyright.setup({
                 on_attach = on_attach,
                 capabilities = capabilities,
-                settings = servers.basedpyright,
+                settings = servers.pyright,
                 single_file_support = true,
             })
 
-            -- Set up ruff for Python formatting/linting
+            -- Set up ruff for Python formatting, linting, and code actions
             lspconfig.ruff.setup({
                 on_attach = on_attach,
                 capabilities = capabilities,
-                init_options = {
-                    settings = {
-                        format = { enabled = true },
-                        lint = { enabled = true },
-                        organizeImports = true,
-                    }
+                init_options = servers.ruff.init_options,
+                commands = {
+                    RuffAutofix = {
+                        function()
+                            vim.lsp.buf.execute_command({
+                                command = 'ruff.applyAutofix',
+                                arguments = {
+                                    { uri = vim.uri_from_bufnr(0) },
+                                },
+                            })
+                        end,
+                        description = 'Fix all auto-fixable problems',
+                    },
+                    RuffOrganizeImports = {
+                        function()
+                            vim.lsp.buf.execute_command({
+                                command = 'ruff.applyOrganizeImports',
+                                arguments = {
+                                    { uri = vim.uri_from_bufnr(0) },
+                                },
+                            })
+                        end,
+                        description = 'Organize imports',
+                    },
                 },
             })
 
             -- Set up other language servers
             for server_name, settings in pairs(servers) do
-                if server_name ~= "basedpyright" and server_name ~= "ruff" then
+                if server_name ~= "pyright" and server_name ~= "ruff" then
                     lspconfig[server_name].setup {
                         capabilities = capabilities,
                         on_attach = on_attach,
@@ -1575,35 +1717,60 @@ local plugins = {
     },
 
     -- Commenting
-    {
-        "numToStr/Comment.nvim",
-        config = function()
-            require("Comment").setup()
-        end,
-    },
+    --
+    --
+    -- 
+    --
+    -- Commenting with custom keybindings
+{
+    "numToStr/Comment.nvim",
+    config = function()
+        require("Comment").setup({
+            -- Add some basic configuration
+            padding = true,
+            sticky = true,
+            ignore = nil,
+            toggler = {
+                line = 'gcc',    -- Line-comment toggle keymap
+                block = 'gbc',   -- Block-comment toggle keymap
+            },
+            opleader = {
+                line = 'gc',     -- Line-comment keymap
+                block = 'gb',    -- Block-comment keymap
+            },
+            extra = {
+                above = 'gcO',   -- Add comment on the line above
+                below = 'gco',   -- Add comment on the line below
+                eol = 'gcA',     -- Add comment at the end of line
+            },
+            mappings = {
+                basic = true,    -- Operator-pending mapping; `gcc` `gbc` `gc[count]{motion}` `gb[count]{motion}`
+                extra = true,    -- Extra mapping; `gco`, `gcO`, `gcA`
+            },
+            pre_hook = nil,
+            post_hook = nil,
+        })
 
-    -- Enhanced indent and scope highlighting (DISABLED - using snacks.indent instead)
-    -- {
-    --     "lukas-reineke/indent-blankline.nvim",
-    --     main = "ibl",
-    --     config = function()
-    --         require("ibl").setup({
-    --             indent = {
-    --                 char = "│",
-    --                 tab_char = "│",
-    --             },
-    --             scope = {
-    --                 enabled = false, -- We'll use snacks.scope for scope
-    --             },
-    --             exclude = {
-    --                 filetypes = {
-    --                     "help", "alpha", "dashboard", "neo-tree", "Trouble",
-    --                     "trouble", "lazy", "mason", "notify", "toggleterm", "lazyterm",
-    --                 },
-    --             },
-    --         })
-    --     end,
-    -- },
+        -- Custom keybindings for leader + c
+        local api = require('Comment.api')
+        
+        -- Toggle comment in NORMAL mode for current line
+        vim.keymap.set('n', '<leader>c', api.toggle.linewise.current, 
+            { desc = 'Comment toggle current line' })
+        
+        -- Toggle comment in VISUAL mode for selection
+        vim.keymap.set('x', '<leader>c', function()
+            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<ESC>', true, false, true), 'nx', false)
+            api.toggle.linewise(vim.fn.visualmode())
+        end, { desc = 'Comment toggle linewise (visual)' })
+        
+        -- Alternative: Toggle comment in VISUAL mode for selection (block comment)
+        vim.keymap.set('x', '<leader>C', function()
+            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<ESC>', true, false, true), 'nx', false)
+            api.toggle.blockwise(vim.fn.visualmode())
+        end, { desc = 'Comment toggle blockwise (visual)' })
+    end,
+},
 
     -- Beautiful UI with Noice
     {
